@@ -29,8 +29,8 @@ import { ErrorTypes, ErrorDetails } from '../errors';
 const RemuxerTrackIdConfig = {
   video: 1,
   audio: 2,
-  id3: 3,
-  text: 4
+  id3:   3,
+  text:  4
 };
 
 class TSDemuxer {
@@ -83,21 +83,22 @@ class TSDemuxer {
    *
    * @param {string} type 'audio' | 'video' | 'id3' | 'text'
    * @param {number} duration
+   * @param {string} sg 'ac3' | undefined
    * @return {object} TSDemuxer's internal track model
    */
-  static createTrack (type, duration) {
+  static createTrack (type, duration, sg = undefined) {
     return {
-      container: type === 'video' || type === 'audio' ? 'video/mp2t' : undefined,
+      container:      type === 'video' || type === 'audio' ? 'video/mp2t' : undefined,
       type,
-      id: RemuxerTrackIdConfig[type],
-      pid: -1,
+      id:             RemuxerTrackIdConfig[type],
+      pid:            -1,
       inputTimeScale: 90000,
       sequenceNumber: 0,
-      samples: [],
-      len: 0,
-      dropped: type === 'video' ? 0 : undefined,
-      isAAC: type === 'audio' ? true : undefined,
-      duration: type === 'audio' ? duration : undefined
+      samples:        [],
+      len:            0,
+      dropped:        type === 'video' ? 0 : undefined,
+      segmentCodec:   type === 'audio' && sg === undefined ? 'aac' : segmentCodec,
+      duration:       type === 'audio' ? duration : undefined
     };
   }
 
@@ -115,10 +116,10 @@ class TSDemuxer {
     this.pmtParsed = false;
     this._pmtId = -1;
 
-    this._avcTrack = TSDemuxer.createTrack('video', duration);
+    this._avcTrack   = TSDemuxer.createTrack('video', duration);
     this._audioTrack = TSDemuxer.createTrack('audio', duration);
-    this._id3Track = TSDemuxer.createTrack('id3', duration);
-    this._txtTrack = TSDemuxer.createTrack('text', duration);
+    this._id3Track   = TSDemuxer.createTrack('id3', duration);
+    this._txtTrack   = TSDemuxer.createTrack('text', duration);
 
     // flush any partial content
     this.aacOverFlow = null;
@@ -140,6 +141,7 @@ class TSDemuxer {
     let start, len = data.length, stt, pid, atf, offset, pes,
       unknownPIDs = false;
     this.contiguous = contiguous;
+<<<<<<< HEAD
     let pmtParsed = this.pmtParsed,
       avcTrack = this._avcTrack,
       audioTrack = this._audioTrack,
@@ -160,6 +162,27 @@ class TSDemuxer {
       parseID3PES = this._parseID3PES.bind(this);
 
     const syncOffset = TSDemuxer._syncOffset(data);
+=======
+    var pmtParsed = this.pmtParsed,
+        avcTrack = this._avcTrack,
+        audioTrack = this._audioTrack,
+        id3Track = this._id3Track,
+        avcId = avcTrack.id,
+        audioId = audioTrack.id,
+        id3Id = id3Track.id,
+        pmtId = this._pmtId,
+        avcData = avcTrack.pesData,
+        audioData = audioTrack.pesData,
+        id3Data = id3Track.pesData,
+        parsePAT = this._parsePAT,
+        parsePMT = this._parsePMT,
+        parsePES = this._parsePES,
+        parseAVCPES = this._parseAVCPES.bind(this),
+        parseAACPES = this._parseAACPES.bind(this),
+        parseMPEGPES = this._parseMPEGPES.bind(this),
+        parseAC3PES = this._parseAC3PES.bind(this),
+        parseID3PES  = this._parseID3PES.bind(this);
+>>>>>>> add support for ac-3 codec
 
     // don't parse last TS packet if incomplete
     len -= (len + syncOffset) % 188;
@@ -181,11 +204,50 @@ class TSDemuxer {
         } else {
           offset = start + 4;
         }
+<<<<<<< HEAD
         switch (pid) {
         case avcId:
           if (stt) {
             if (avcData && (pes = parsePES(avcData)) && pes.pts !== undefined) {
               parseAVCPES(pes, false);
+=======
+        switch(pid) {
+          case avcId:
+            if (stt) {
+              if (avcData && (pes = parsePES(avcData))) {
+                parseAVCPES(pes,false);
+              }
+              avcData = {data: [], size: 0};
+            }
+            if (avcData) {
+              avcData.data.push(data.subarray(offset, start + 188));
+              avcData.size += start + 188 - offset;
+            }
+            break;
+          case audioId:
+            if (stt) {
+              if (audioData && (pes = parsePES(audioData))) {
+                switch (audioTrack.segmentCodec)
+                {
+                case 'aac':
+                  parseAACPES(pes);
+                  break;
+
+                case 'mp3':
+                  parseMPEGPES(pes);
+                  break;
+
+                case 'ac3':
+                  parseAC3PES(pes);
+                  break;
+                }
+              }
+              audioData = {data: [], size: 0};
+            }
+            if (audioData) {
+              audioData.data.push(data.subarray(offset, start + 188));
+              audioData.size += start + 188 - offset;
+>>>>>>> add support for ac-3 codec
             }
 
             avcData = { data: [], size: 0 };
@@ -203,6 +265,40 @@ class TSDemuxer {
               } else {
                 parseMPEGPES(pes);
               }
+<<<<<<< HEAD
+=======
+              id3Data = {data: [], size: 0};
+            }
+            if (id3Data) {
+              id3Data.data.push(data.subarray(offset, start + 188));
+              id3Data.size += start + 188 - offset;
+            }
+            break;
+          case 0:
+            if (stt) {
+              offset += data[offset] + 1;
+            }
+            pmtId = this._pmtId = parsePAT(data, offset);
+            break;
+          case pmtId:
+            if (stt) {
+              offset += data[offset] + 1;
+            }
+            let parsedPIDs = parsePMT(data, offset, this.typeSupported, this.sampleAes != null);
+
+            // only update track id if track PID found while parsing PMT
+            // this is to avoid resetting the PID to -1 in case
+            // track PID transiently disappears from the stream
+            // this could happen in case of transient missing audio samples for example
+            avcId = parsedPIDs.avc;
+            if (avcId > 0) {
+              avcTrack.id = avcId;
+            }
+            audioId = parsedPIDs.audio;
+            if (audioId > 0) {
+              audioTrack.id = audioId;
+              audioTrack.segmentCodec = parsedPIDs.segmentCodec;
+>>>>>>> add support for ac-3 codec
             }
             audioData = { data: [], size: 0 };
           }
@@ -287,11 +383,25 @@ class TSDemuxer {
       avcTrack.pesData = avcData;
     }
 
+<<<<<<< HEAD
     if (audioData && (pes = parsePES(audioData)) && pes.pts !== undefined) {
       if (audioTrack.isAAC) {
+=======
+    if (audioData && (pes = parsePES(audioData))) {
+      switch (audioTrack.segmentCodec)
+      {
+      case 'aac':
+>>>>>>> add support for ac-3 codec
         parseAACPES(pes);
-      } else {
+        break;
+
+      case 'mp3':
         parseMPEGPES(pes);
+        break;
+
+      case 'ac3':
+        parseAC3PES(pes);
+        break;
       }
 
       audioTrack.pesData = null;
@@ -319,8 +429,13 @@ class TSDemuxer {
     }
   }
 
+<<<<<<< HEAD
   decryptAndRemux (audioTrack, videoTrack, id3Track, textTrack, timeOffset, contiguous, accurateTimeOffset) {
     if (audioTrack.samples && audioTrack.isAAC) {
+=======
+  decryptAndRemux(audioTrack, videoTrack, id3Track, textTrack, timeOffset, contiguous, accurateTimeOffset) {
+    if (audioTrack.samples && audioTrack.segmentCodec === 'aac') {
+>>>>>>> add support for ac-3 codec
       let localthis = this;
       this.sampleAes.decryptAacSamples(audioTrack.samples, 0, function () {
         localthis.decryptAndRemuxAvc(audioTrack, videoTrack, id3Track, textTrack, timeOffset, contiguous, accurateTimeOffset);
@@ -352,8 +467,13 @@ class TSDemuxer {
     // logger.log('PMT PID:'  + this._pmtId);
   }
 
+<<<<<<< HEAD
   _parsePMT (data, offset, mpegSupported, isSampleAes) {
     let sectionLength, tableEnd, programInfoLength, pid, result = { audio: -1, avc: -1, id3: -1, isAAC: true };
+=======
+  _parsePMT(data, offset, typeSupported, isSampleAes) {
+    var sectionLength, tableEnd, programInfoLength, pid, result = { audio : -1, avc : -1, id3 : -1, segmentCodec : 'aac'};
+>>>>>>> add support for ac-3 codec
     sectionLength = (data[offset + 1] & 0x0f) << 8 | data[offset + 2];
     tableEnd = offset + 3 + sectionLength - 4;
     // to determine where the table is, we have to figure out how
@@ -407,6 +527,7 @@ class TSDemuxer {
 
         // ISO/IEC 11172-3 (MPEG-1 audio)
         // or ISO/IEC 13818-3 (MPEG-2 halved sample rate audio)
+<<<<<<< HEAD
       case 0x03:
       case 0x04:
         // logger.log('MPEG PID:'  + pid);
@@ -417,6 +538,27 @@ class TSDemuxer {
           result.isAAC = false;
         }
         break;
+=======
+        case 0x03:
+        case 0x04:
+          //logger.log('MPEG PID:'  + pid);
+          if (typeSupported.mpeg !== true && typeSupported.mp3 !== true) {
+            logger.log('MPEG audio found, not supported in this browser for now');
+          } else if (result.audio === -1) {
+            result.audio = pid;
+            result.segmentCodec = 'mp3';
+          }
+          break;
+
+        case 0x81:
+          if (typeSupported.ac3 !== true) {
+            logger.log('AC-3 audio found, not supported in this browser for now');
+          } else if (result.audio === -1) {
+            result.audio = pid;
+            result.segmentCodec = 'ac3';
+          }
+          break;
+>>>>>>> add support for ac-3 codec
 
       case 0x24:
         logger.warn('HEVC stream type found, not supported for now');
@@ -1047,7 +1189,141 @@ class TSDemuxer {
     }
   }
 
+<<<<<<< HEAD
   _parseID3PES (pes) {
+=======
+  _parseAC3PES(pes) {
+    var data = pes.data;
+    var pts = pes.pts;
+    var length = data.length;
+    var frameIndex = 0;
+    var offset = 0;
+    var parsed;
+
+    while (offset < length &&
+        (parsed = this._parseAC3(data, offset, length, frameIndex++, pts)) > 0) {
+        offset += parsed;
+    }
+  }
+
+  _onAC3Frame(data, sampleRate, channelCount, extraData, frameIndex, pts) {
+    var frameDuration = (1536 / sampleRate) * 1000;
+    var stamp = pts + frameIndex * frameDuration;
+    var track = this._audioTrack;
+
+    track.config = [];
+    track.channelCount = channelCount;
+    track.extraData = extraData;
+    track.samplerate = sampleRate;
+    track.duration = this._duration;
+    track.samples.push({unit: data, pts: stamp, dts: stamp});
+    track.len += data.length;
+  }
+
+  _parseAC3(data, start, end, frameIndex, pts) {
+    if (start + 8 > end) {
+        return -1;    // not enough bytes left
+    }
+
+    if (data[start] !== 0x0b || data[start + 1] !== 0x77) {
+        return -1;    // invalid magic
+    }
+
+    // get sample rate
+    let samplingRateCode = data[start + 4] >> 6;
+    if (samplingRateCode >= 3) {
+        return -1;    // invalid sampling rate
+    }
+
+    let samplingRateMap = [48000, 44100, 32000];
+    let sampleRate = samplingRateMap[samplingRateCode];
+
+    // get frame size
+    let frameSizeCode = data[start + 4] & 0x3f;
+    let frameSizeMap = [
+        64,   69,   96,
+        64,   70,   96,
+        80,   87,   120,
+        80,   88,   120,
+        96,   104,  144,
+        96,   105,  144,
+        112,  121,  168,
+        112,  122,  168,
+        128,  139,  192,
+        128,  140,  192,
+        160,  174,  240,
+        160,  175,  240,
+        192,  208,  288,
+        192,  209,  288,
+        224,  243,  336,
+        224,  244,  336,
+        256,  278,  384,
+        256,  279,  384,
+        320,  348,  480,
+        320,  349,  480,
+        384,  417,  576,
+        384,  418,  576,
+        448,  487,  672,
+        448,  488,  672,
+        512,  557,  768,
+        512,  558,  768,
+        640,  696,  960,
+        640,  697,  960,
+        768,  835,  1152,
+        768,  836,  1152,
+        896,  975,  1344,
+        896,  976,  1344,
+        1024, 1114, 1536,
+        1024, 1115, 1536,
+        1152, 1253, 1728,
+        1152, 1254, 1728,
+        1280, 1393, 1920,
+        1280, 1394, 1920,
+    ];
+
+    let frameLength = frameSizeMap[frameSizeCode * 3 + samplingRateCode] * 2;
+    if (start + frameLength > end) {
+        return -1;
+    }
+
+    // get channel count
+    let channelMode = data[start + 6] >> 5;
+    let skipCount = 0;
+    if (channelMode === 2) {
+        skipCount += 2;
+    } else {
+      if ((channelMode & 1) && channelMode !== 1) {
+        skipCount += 2;
+      }
+      if (channelMode & 4) {
+        skipCount += 2;
+      }
+    }
+
+    let lfeon = (((data[start + 6] << 8) | data[start + 7]) >> (12 - skipCount)) & 1;
+
+    let channelsMap = [2, 1, 2, 3, 3, 4, 4, 5];
+    let channelCount = channelsMap[channelMode] + lfeon;
+
+    // build dac3 box (save it as a single int)
+    let bsid = data[start + 5] >> 3;
+    let bsmod = data[start + 5] & 7;
+
+    let extraData =
+        (samplingRateCode << 22) |
+        (bsid << 17) |
+        (bsmod << 14) |
+        (channelMode << 11) |
+        (lfeon << 10) |
+        ((frameSizeCode >> 1) << 5);
+
+    this._onAC3Frame(data.subarray(start, start + frameLength), sampleRate, channelCount, extraData, frameIndex, pts);
+
+    return frameLength;
+  }
+
+  _parseID3PES(pes) {
+>>>>>>> add support for ac-3 codec
     this._id3Track.samples.push(pes);
   }
 }

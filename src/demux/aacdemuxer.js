@@ -12,8 +12,8 @@ class AACDemuxer {
     this.remuxer = remuxer;
   }
 
-  resetInitSegment (initSegment, audioCodec, videoCodec, duration) {
-    this._audioTrack = { container: 'audio/adts', type: 'audio', id: 0, sequenceNumber: 0, isAAC: true, samples: [], len: 0, manifestCodec: audioCodec, duration: duration, inputTimeScale: 90000 };
+  resetInitSegment(initSegment,audioCodec,videoCodec, duration) {
+    this._aacTrack = {container : 'audio/adts', type: 'audio', id :-1, sequenceNumber: 0, segmentCodec : 'aac' , samples : [], len : 0, manifestCodec : audioCodec, duration : duration, inputTimeScale : 90000};
   }
 
   resetTimeStamp () {

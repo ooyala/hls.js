@@ -123,21 +123,27 @@ class MP4Remuxer {
       // using audio sampling rate here helps having an integer MP4 frame duration
       // this avoids potential rounding issue and AV sync issue
       audioTrack.timescale = audioTrack.samplerate;
-      logger.log(`audio sampling rate : ${audioTrack.samplerate}`);
-      if (!audioTrack.isAAC) {
+      logger.log (`audio sampling rate : ${audioTrack.samplerate}`);
+      switch (audioTrack.segmentCodec) {
+      case 'mp3':
         if (typeSupported.mpeg) { // Chrome and Safari
           container = 'audio/mpeg';
           audioTrack.codec = '';
         } else if (typeSupported.mp3) { // Firefox
           audioTrack.codec = 'mp3';
         }
+        break;
+
+      case 'ac3':
+        audioTrack.codec = 'ac-3';
+        break;
       }
       tracks.audio = {
-        container: container,
-        codec: audioTrack.codec,
-        initSegment: !audioTrack.isAAC && typeSupported.mpeg ? new Uint8Array() : MP4.initSegment([audioTrack]),
-        metadata: {
-          channelCount: audioTrack.channelCount
+        container : container,
+        codec :  audioTrack.codec,
+        initSegment : audioTrack.segmentCodec === 'mp3' && typeSupported.mpeg ? new Uint8Array() : MP4.initSegment([audioTrack]),
+        metadata : {
+          channelCount : audioTrack.channelCount
         }
       };
       if (computePTSDTS) {
@@ -438,22 +444,31 @@ class MP4Remuxer {
 
   remuxAudio (track, timeOffset, contiguous, accurateTimeOffset) {
     const inputTimeScale = track.inputTimeScale,
-      mp4timeScale = track.timescale,
-      scaleFactor = inputTimeScale / mp4timeScale,
-      mp4SampleDuration = track.isAAC ? 1024 : 1152,
-      inputSampleDuration = mp4SampleDuration * scaleFactor,
-      ptsNormalize = this._PTSNormalize,
-      initDTS = this._initDTS,
-      rawMPEG = !track.isAAC && this.typeSupported.mpeg;
+          mp4timeScale = track.timescale,
+          scaleFactor = inputTimeScale/mp4timeScale,
+          mp4SampleDuration = track.segmentCodec === 'aac' ? 1024 :
+            (track.segmentCodec === 'mp3' ? 1152 : 1536),
+          inputSampleDuration = mp4SampleDuration * scaleFactor,
+          ptsNormalize = this._PTSNormalize,
+          initDTS = this._initDTS,
+          rawMPEG = track.segmentCodec === 'mp3' && this.typeSupported.mpeg;
 
-    let offset,
-      mp4Sample,
-      fillFrame,
-      mdat, moof,
-      firstPTS, lastPTS,
-      inputSamples = track.samples,
-      outputSamples = [],
-      nextAudioPts = this.nextAudioPts;
+    var view,
+        offset = rawMPEG ? 0 : 8,
+        audioSample, mp4Sample,
+        unit,
+        mdat, moof,
+        firstPTS, firstDTS, lastDTS,
+        pts, dts, ptsnorm, dtsnorm,
+        outputSamples = [],
+        inputSamples = [],
+        fillFrame, newStamp,
+        nextAudioPts;
+
+    track.samples.sort(function(a, b) {
+      return (a.pts-b.pts);
+    });
+    inputSamples = track.samples;
 
     // for audio samples, also consider consecutive fragments as being contiguous (even if a level switch occurs),
     // for sake of clarity:
@@ -501,9 +516,9 @@ class MP4Remuxer {
     // When possible, we inject a silent frame; when that's not possible, we duplicate the last
     // frame.
 
-    if (track.isAAC) {
-      const maxAudioFramesDrift = this.config.maxAudioFramesDrift;
-      for (let i = 0, nextPts = nextAudioPts; i < inputSamples.length;) {
+    // only inject/drop audio frames in case time offset is accurate
+    if (accurateTimeOffset && track.segmentCodec === 'aac') {
+      for (let i = 0, nextPtsNorm = nextAudioPts; i < inputSamples.length; ) {
         // First, let's see how far off this frame is from where we expect it to be
         var sample = inputSamples[i], delta;
         let pts = sample.pts;
@@ -568,7 +583,7 @@ class MP4Remuxer {
           numMissingFrames = 0;
         // if fragment are contiguous, detect hole/overlapping between fragments
         // contiguous fragments are consecutive fragments from same quality level (same level, new SN = old SN + 1)
-        if (contiguous && track.isAAC) {
+        if (contiguous && track.segmentCodec === 'aac') {
           // log delta
           if (delta) {
             if (delta > 0 && delta < MAX_SILENT_FRAME_DURATION) {
